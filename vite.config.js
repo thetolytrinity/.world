@@ -9,7 +9,7 @@ export default {
         open: !('SANDBOX_URL' in process.env || 'CODESANDBOX_HOST' in process.env) // Open if not in CodeSandbox
     },
     build: {
-        outDir: '../docs', // Output into docs/ for GitHub Pages
+        outDir: 'docs', // Output into docs/ for GitHub Pages
         emptyOutDir: true, // Empty the folder first
         sourcemap: true // Add sourcemap
     },
