@@ -1,0 +1,41 @@
+# Node modules
+node_modules/
+
+# Vite build output (if not needed in Git)
+dist/
+
+# Mac system files
+.DS_Store
+
+# Log files
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Env / secret config
+.env
+.env.local
+.env.*
+
+# Your presence trigger
+public/iamme.html
+
+# presence fluff
+tumpz-presence/node_modules/
+tumpz-presence/.wrangler/
+tumpz-presence/*.log
+
+# Cloudflare Wrangler logs
+wrangler.toml.lock
+.wrangler/
+wrangler-*.log
+*.log
+
+
+# Cache / temporary files
+.vscode/
+.cache/
+.temp/
+*.tmp
+*.swp
+*.swo
