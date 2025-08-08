@@ -2,32 +2,65 @@ import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { Timer } from 'three/addons/misc/Timer.js'
 import GUI from 'lil-gui'
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 
-/**
- * Base
- */
+/*** Base */
+
 // Debug
-const gui = new GUI()
+const gui = new GUI({
+    width: 200,
+    title: 'admin',
+})
+gui.hide ()
 
+// Debug object for GUI controls
+const debugObject = {
+    wireframe:false,
+    pixelDensity: 2,
+}
+
+// keydown event to hide/show admin
+let guiVisible = false // TRACKING STATE
+
+window.addEventListener('keydown', (event) => {
+    if (event.key === 'h') {
+        guiVisible = !guiVisible // FLIPPING STATE
+        if (guiVisible) {
+            gui.show()
+        } else {
+            gui.hide()
+        }
+    }
+})
 // Canvas
 const canvas = document.querySelector('canvas.webgl')
 
+
 // Scene
 const scene = new THREE.Scene()
+scene.background = new THREE.Color('#e3efff')
 
-/**
- * House
- */
-// Temporary sphere
-const sphere = new THREE.Mesh(
-    new THREE.SphereGeometry(1, 32, 32),
-    new THREE.MeshStandardMaterial({ roughness: 0.7 })
-)
-scene.add(sphere)
+/*** AVATAR - TUMPZ */
+
+// MODEL
+let tumpz = null;
+let tumpzMixer = null;
+const loader = new GLTFLoader();
+
+loader.load (`models/Runaway.glb`, (gltf) =>
+{
+
+    tumpz = gltf.scene
+    tumpz.scale.set (.3, .3, .3 ) //HAVE TO SCALE PLACEHOLDER MODEL FOR NOW
+    tumpz.position.set(0, 0, 0)
+
+    scene.add(tumpz)
+})
 
 /**
  * Lights
  */
+
 // Ambient light
 const ambientLight = new THREE.AmbientLight('#ffffff', 0.5)
 scene.add(ambientLight)
@@ -45,8 +78,16 @@ const sizes = {
     height: window.innerHeight
 }
 
-window.addEventListener('resize', () =>
-{
+const visuals = gui.addFolder('renderer')
+visuals.add(debugObject, 'pixelDensity')
+    .min(1)
+    .max(8)
+    .step(1)
+    .name('pixelation')
+    .onChange(updatePixelation)
+
+//AUTO RESIZING FUNCTION
+window.addEventListener('resize', () => {
     // Update sizes
     sizes.width = window.innerWidth
     sizes.height = window.innerHeight
@@ -55,33 +96,48 @@ window.addEventListener('resize', () =>
     camera.aspect = sizes.width / sizes.height
     camera.updateProjectionMatrix()
 
-    // Update renderer
-    renderer.setSize(sizes.width, sizes.height)
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+    // Update renderer with current pixel density
+    updatePixelation()
 })
 
 /**
  * Camera
  */
+
 // Base camera
 const camera = new THREE.PerspectiveCamera(75, sizes.width / sizes.height, 0.1, 100)
-camera.position.x = 4
-camera.position.y = 2
-camera.position.z = 5
+//camera.position.x = 4
+//camera.position.y = 4
+camera.position.z = 3
 scene.add(camera)
 
 // Controls
 const controls = new OrbitControls(camera, canvas)
 controls.enableDamping = true
 
-/**
- * Renderer
- */
+//Renderer
 const renderer = new THREE.WebGLRenderer({
-    canvas: canvas
+    canvas: canvas,
+    antialias: false
 })
-renderer.setSize(sizes.width, sizes.height)
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+renderer.setPixelRatio(1) // HD SMOOTHING OFF
+renderer.domElement.style.imageRendering = 'pixelated'
+renderer.domElement.style.width = '100%'
+renderer.domElement.style.height = '100%'
+
+function updatePixelation() {
+    if (!renderer) return
+    // Low resolution render > upscale via CSS
+    renderer.setPixelRatio(1) // keep pixels crisp
+    renderer.setSize(
+        sizes.width / debugObject.pixelDensity,
+        sizes.height / debugObject.pixelDensity,
+        false
+    )
+}
+
+// Initial sizing based on current pixel density
+updatePixelation()
 
 /**
  * Animate
