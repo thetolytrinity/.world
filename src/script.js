@@ -153,6 +153,11 @@ scene.add(camera)
 const controls = new OrbitControls(camera, canvas)
 controls.enableDamping = true
 
+// --- Default view snapshot (captured on load) ---
+const defaultView = { pos: new THREE.Vector3(), target: new THREE.Vector3() }
+defaultView.pos.copy(camera.position)
+defaultView.target.copy(controls.target)
+
 //Renderer
 const renderer = new THREE.WebGLRenderer({
     canvas: canvas,
@@ -173,6 +178,7 @@ function updatePixelation() {
         false
     )
 }
+
 // Initial sizing based on current pixel density
 updatePixelation()
 
@@ -210,15 +216,60 @@ function toNDC(event) {
 
 }
 
-renderer.domElement.addEventListener ('pointerup', (event) => {
-    if (!tumpz) return
+// --- Prevent single-click firing on double-click ---
+let singleClickTimer = null
+const CLICK_DELAY = 250
+
+renderer.domElement.addEventListener('pointerup', (event) => {
+    if (!tumpz || isFocused) return
+    if (singleClickTimer) clearTimeout(singleClickTimer)
+    const e = { clientX: event.clientX, clientY: event.clientY }
+    singleClickTimer = setTimeout(() => {
+        toNDC({ clientX: e.clientX, clientY: e.clientY })
+        raycaster.setFromCamera(ndc, camera)
+        const hits = raycaster.intersectObject(tumpz, true)
+        if (hits.length) {
+            toggleFocus()
+        }
+        singleClickTimer = null
+    }, CLICK_DELAY)
+})
+
+//  --- Double click focused model to restore default view
+renderer.domElement.addEventListener('dblclick', (event) => {
+    if (singleClickTimer) { clearTimeout(singleClickTimer); singleClickTimer = null }
+    if (!isFocused || !tumpz) return
     toNDC(event)
-    raycaster.setFromCamera (ndc, camera)
-    const hits = raycaster.intersectObject (tumpz, true)
+    raycaster.setFromCamera(ndc, camera)
+    const hits = raycaster.intersectObject(tumpz, true)
     if (hits.length) {
-        frameFront(tumpz)
+        restoreDefaultView()
+        isFocused = false
     }
 })
+
+// --- Toggle Focus Helper
+let isFocused = false
+const savedView = { pos: new THREE.Vector3(), target: new THREE.Vector3() }
+
+function saveView() {
+    savedView.pos.copy(camera.position)
+    savedView.target.copy(controls.target)
+}
+
+function restoreDefaultView() {
+    controls.target.copy(defaultView.target)
+    camera.position.copy(defaultView.pos)
+    camera.lookAt(defaultView.target)
+    controls.update()
+}
+
+function toggleFocus() {
+    if (isFocused) return
+    saveView()
+    frameFront(tumpz)
+    isFocused = true
+}
 
 // --- HDRI / WORLD LIGHTING ---
 renderer.outputColorSpace = THREE.SRGBColorSpace
@@ -273,9 +324,14 @@ window.addEventListener('keydown', (event) => {
         if (document.activeElement !== renderer.domElement) return
     }
 
-    // Frame front view (F)
+    // Frame front view (F) — toggle behavior
     if (event.key === 'f' || event.key === 'F') {
-        frameFront(tumpz)
+        if (isFocused) {
+            restoreDefaultView()
+            isFocused = false
+        } else {
+            toggleFocus()
+        }
     }
     // ... other key handlers ...
 })
