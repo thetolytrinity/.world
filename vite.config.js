@@ -6,7 +6,14 @@ export default {
     base: './', // Required for GitHub Pages to use relative paths
     server: {
         host: true, // Open to local network and display URL
-        open: !('SANDBOX_URL' in process.env || 'CODESANDBOX_HOST' in process.env) // Open if not in CodeSandbox
+        open: !('SANDBOX_URL' in process.env || 'CODESANDBOX_HOST' in process.env), // Open if not in CodeSandbox
+        proxy: {
+            '/presence': {
+                target: 'https://tumpz-presence.thetolytrinity.workers.dev',
+                changeOrigin: true,
+                rewrite: p => p.replace(/^\/presence/, '')
+            }
+        }
     },
     build: {
         outDir: '../docs', // Output into docs/ for GitHub Pages

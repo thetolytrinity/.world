@@ -38,28 +38,106 @@ window.addEventListener('keydown', (event) => {
 // Canvas
 const canvas = document.querySelector('canvas.webgl')
 
-
 // Scene
 const scene = new THREE.Scene()
 scene.background = new THREE.Color('#e3efff')
 
 /*** AVATAR - TUMPZ */
 
-// MODEL
+// MODEL 
 let tumpz = null;
 let tumpzMixer = null;
 const loader = new GLTFLoader();
 
 loader.load (`models/tumpz_.glb`, (gltf) =>
 {
-
     tumpz = gltf.scene
     tumpz.scale.set (.7, .7, .7 ) //HAVE TO SCALE PLACEHOLDER MODEL FOR NOW
 
-
     scene.add(tumpz)
     
+  const headNode = tumpz.getObjectByName('Head') || tumpz.getObjectByName('head') || tumpz;
+  headNode.add(presenceOrb);
+  presenceOrb.position.set(0.25, 0.2, 0.0); // tweak offset as needed
+    
 })
+
+// ONLINE PRESENCE TETHER
+
+const presenceMat = new THREE.MeshBasicMaterial ({ color : 0x444444 });
+const presenceOrb = new THREE.Mesh(
+    new THREE.SphereGeometry (0.03, 16, 16),
+    presenceMat
+);
+
+// presenceOrb.position.set(0.175, 1.25, 0.0); // moved to loader callback
+// scene.add (presenceOrb);
+
+
+const PRESENCE_BASE = import.meta.env.DEV
+  ? '/presence' // use Vite proxy in dev
+  : 'https://tumpz-presence.thetolytrinity.workers.dev'; // real Worker in prod
+
+const PRESENCE_URL_STATUS = `${PRESENCE_BASE}/api/status`;
+const PRESENCE_URL_PING   = `${PRESENCE_BASE}/api/ping`;
+
+// Presence tiers (now/recent/stale)
+const COLOR_NOW    = 0x00ff66; // green
+const COLOR_RECENT = 0xffcc00; // yellow
+const COLOR_STALE  = 0x444444; // grey
+const FRESH_MS  = 5  * 60 * 1000;  // "online now" window (5 min)
+const RECENT_MS = 30 * 60 * 1000;  // "active recently" (30 min)
+
+function setPresenceFromLastSeen(lastSeen) {
+  const t = Date.parse(lastSeen || 0);
+  if (isNaN(t)) { presenceMat.color.set(COLOR_STALE); return; }
+  const age = Date.now() - t;
+  if (age <= FRESH_MS)       presenceMat.color.set(COLOR_NOW);
+  else if (age <= RECENT_MS) presenceMat.color.set(COLOR_RECENT);
+  else                       presenceMat.color.set(COLOR_STALE);
+}
+
+async function refreshPresence() {
+  try {
+    const r = await fetch(PRESENCE_URL_STATUS, { cache: 'no-store' });
+    if (!r.ok) throw new Error('status ' + r.status);
+    const data = await r.json();
+    console.log('[presence] status payload:', data);
+
+    if (typeof data.online === 'boolean' && data.lastSeen) {
+      // If the Worker eventually sends both, prefer lastSeen tiering
+      setPresenceFromLastSeen(data.lastSeen);
+    } else if (data.lastSeen) {
+      setPresenceFromLastSeen(data.lastSeen);
+    } else if (typeof data.online === 'boolean') {
+      presenceMat.color.set(data.online ? COLOR_NOW : COLOR_STALE);
+    } else {
+      presenceMat.color.set(COLOR_STALE);
+    }
+
+    const deltaMin = data.lastSeen ? ((Date.now() - Date.parse(data.lastSeen)) / 60000).toFixed(1) : 'n/a';
+    console.log('[presence] lastSeen Δmin =', deltaMin);
+  } catch (e) {
+    console.warn('[presence] using offline fallback:', e?.message || e);
+    presenceMat.color.set(COLOR_STALE);
+  }
+}
+
+// run once and then poll
+refreshPresence();
+setInterval(refreshPresence, 15000);
+
+const presenceFolder = gui.addFolder('Presence');
+presenceFolder.add(presenceOrb, 'visible').name('Show orb');
+
+// Dev-only manual ping so main site stays read-only in production
+if (import.meta.env.DEV) {
+    presenceFolder.add({ ping: () => {
+      fetch(PRESENCE_URL_PING, { method: 'POST' })
+        .then(() => { console.log('[presence] dev pinged'); refreshPresence(); })
+        .catch((e) => console.error('[presence] ping failed', e));
+    }}, 'ping').name('Dev ping');
+}
 
 /*** LIGHTS */
 const hemi = new THREE.HemisphereLight(0xffffff, 0x444444, 1.0);
@@ -73,7 +151,7 @@ dir.castShadow = false;
 scene.add(ambient, dir);
 
 
-//Spot Light
+// Spot Light
 const spotLight = new THREE.SpotLight(debugObject.color, 4.5, 10, Math.PI * 0.1, 0.25, 1)
 spotLight.position.set(0, 2, 3)
 spotLight.target.position.x = - 0.75
@@ -308,6 +386,15 @@ const tick = () =>
 
     // Call tick again on the next frame
     window.requestAnimationFrame(tick)
+
+    // online presence orb
+    const isOnline = presenceMat.color.getHex() === 0x00ff66;
+if (isOnline) {
+  const s = 1 + 0.08 * Math.sin(performance.now()/250);
+  presenceOrb.scale.set(s, s, s);
+} else {
+  presenceOrb.scale.set(1,1,1);
+}
 }
 
 tick()
