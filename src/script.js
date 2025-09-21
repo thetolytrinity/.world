@@ -17,7 +17,7 @@ gui.hide ()
 // Debug object for GUI controls
 const debugObject = {
     wireframe:false,
-    pixelDensity: 2,
+    pixelDensity: 1.45,
     color: 0x020201, // SPOTLIGHT COLOR
 
 }
@@ -60,7 +60,18 @@ loader.load (`models/tumpz_.glb`, (gltf) =>
   headNode.add(presenceOrb);
   presenceOrb.position.set(0.25, 0.2, 0.0); // tweak offset as needed
     
-})
+  // --- Animation setup ---
+  if (gltf.animations && gltf.animations.length) {
+    tumpzMixer = new THREE.AnimationMixer(tumpz);
+    const idleClip = THREE.AnimationClip.findByName(gltf.animations, 'idle');
+    if (idleClip) {
+      const action = tumpzMixer.clipAction(idleClip);
+      action.play();
+    } else {
+      console.warn('No idle animation found in GLB');
+    }
+  }
+});
 
 // ONLINE PRESENCE TETHER
 
@@ -70,10 +81,7 @@ const presenceOrb = new THREE.Mesh(
     presenceMat
 );
 
-// presenceOrb.position.set(0.175, 1.25, 0.0); // moved to loader callback
-// scene.add (presenceOrb);
-
-
+// --- Presence API endpoints ---
 const PRESENCE_BASE = import.meta.env.DEV
   ? '/presence' // use Vite proxy in dev
   : 'https://tumpz-presence.thetolytrinity.workers.dev'; // real Worker in prod
@@ -81,13 +89,14 @@ const PRESENCE_BASE = import.meta.env.DEV
 const PRESENCE_URL_STATUS = `${PRESENCE_BASE}/api/status`;
 const PRESENCE_URL_PING   = `${PRESENCE_BASE}/api/ping`;
 
-// Presence tiers (now/recent/stale)
+// --- Presence tiers (now/recent/gone)
 const COLOR_NOW    = 0x00ff66; // green
 const COLOR_RECENT = 0xffcc00; // yellow
 const COLOR_STALE  = 0x444444; // grey
 const FRESH_MS  = 5  * 60 * 1000;  // "online now" window (5 min)
 const RECENT_MS = 30 * 60 * 1000;  // "active recently" (30 min)
 
+// --- Presence logic ---
 function setPresenceFromLastSeen(lastSeen) {
   const t = Date.parse(lastSeen || 0);
   if (isNaN(t)) { presenceMat.color.set(COLOR_STALE); return; }
@@ -197,7 +206,7 @@ const visuals = gui.addFolder('renderer')
 visuals.add(debugObject, 'pixelDensity')
     .min(1)
     .max(8)
-    .step(1)
+    .step(0.1)
     .name('pixelation')
     .onChange(updatePixelation)
 
@@ -215,17 +224,17 @@ window.addEventListener('resize', () => {
     updatePixelation()
 })
 
-
 /**
  * Camera
  */
 
 // Base camera
-const camera = new THREE.PerspectiveCamera(75, sizes.width / sizes.height, 0.1, 100)
+const camera = new THREE.PerspectiveCamera(55, sizes.width / sizes.height, 0.1, 100)
 //camera.position.x = 4
-//camera.position.y = 4
+camera.position.y = 0.75
 camera.position.z = 3
 scene.add(camera)
+
 
 // Controls
 const controls = new OrbitControls(camera, canvas)
@@ -260,26 +269,45 @@ function updatePixelation() {
 // Initial sizing based on current pixel density
 updatePixelation()
 
-// --- Frame Front function (robust) ---
-function frameFront(object) {
-    if (!object) return
-    // Ensure world transforms are up-to-date (handles scaled/offset models)
-    object.updateWorldMatrix(true, true)
+function frameFront(object, opts = {}) {
+  if (!object) return;
 
-    const box = new THREE.Box3().setFromObject(object)
-    const center = box.getCenter(new THREE.Vector3())
-    const size = box.getSize(new THREE.Vector3())
-    const maxDim = Math.max(size.x, size.y, size.z) || 2
+  const targetYOffset = opts.targetYOffset ?? debugObject.frameYOffset ?? 0;
+  const keepViewDir = opts.keepViewDir ?? true; // default: preserve current angle
 
-    // Distance: fit object with small padding
-    const fov = camera.fov * Math.PI / 180
-    let distance = (maxDim * 1.15) / (2 * Math.tan(fov / 2))
-    distance = THREE.MathUtils.clamp(distance, controls.minDistance, controls.maxDistance)
+  // Ensure world transforms up to date
+  object.updateWorldMatrix(true, true);
 
-    controls.target.copy(center)
-    camera.position.set(center.x, center.y, center.z + distance)
-    camera.lookAt(center)
-    controls.update()
+  // Bounds
+  const box = new THREE.Box3().setFromObject(object);
+  const center = box.getCenter(new THREE.Vector3());
+  const size = box.getSize(new THREE.Vector3());
+  const maxDim = Math.max(size.x, size.y, size.z) || 2;
+
+  // Fit distance with padding
+  const fov = camera.fov * Math.PI / 180;
+  let distance = (maxDim * 1.15) / (2 * Math.tan(fov / 2));
+  distance = THREE.MathUtils.clamp(distance, controls.minDistance || 0, controls.maxDistance || distance);
+
+  // Target with Y offset
+  const target = center.clone();
+  target.y += targetYOffset;
+
+  // Keep current viewing direction (don’t snap to head-on)
+  let newPos;
+  if (keepViewDir) {
+    const dir = new THREE.Vector3().subVectors(camera.position, controls.target).normalize();
+    if (!isFinite(dir.lengthSq()) || dir.lengthSq() === 0) dir.set(0, 0, 1);
+    newPos = target.clone().addScaledVector(dir, distance);
+  } else {
+    newPos = new THREE.Vector3(target.x, target.y, target.z + distance);
+  }
+
+  // Apply
+  controls.target.copy(target);
+  camera.position.copy(newPos);
+  camera.lookAt(target);
+  controls.update();
 }
 
 /** MOUSE CLICK FUNCTION */
@@ -365,7 +393,69 @@ new RGBELoader()
     pmrem.dispose()
   })
 
-  
+  // --- Camera GUI ---
+const camFolder = gui.addFolder('Camera');
+
+const cam = {
+  // live values
+  fov: camera.fov,
+  x: camera.position.x,
+  y: camera.position.y,
+  z: camera.position.z,
+  tx: controls.target.x,
+  ty: controls.target.y,
+  tz: controls.target.z,
+
+  // helpers
+  apply() {
+    camera.position.set(cam.x, cam.y, cam.z);
+    controls.target.set(cam.tx, cam.ty, cam.tz);
+    camera.fov = cam.fov;
+    camera.updateProjectionMatrix();
+    controls.update();
+  },
+  reset() {
+    controls.target.copy(defaultView.target);
+    camera.position.copy(defaultView.pos);
+    cam.fov = camera.fov;
+    cam.x = camera.position.x; cam.y = camera.position.y; cam.z = camera.position.z;
+    cam.tx = controls.target.x; cam.ty = controls.target.y; cam.tz = controls.target.z;
+    camera.updateProjectionMatrix();
+    controls.update();
+    camCtrls.forEach(c => c.updateDisplay());
+  },
+  frameTumpz() {
+    frameFront(tumpz);
+    // sync GUI with the new view
+    cam.fov = camera.fov;
+    cam.x = camera.position.x; cam.y = camera.position.y; cam.z = camera.position.z;
+    cam.tx = controls.target.x; cam.ty = controls.target.y; cam.tz = controls.target.z;
+    camCtrls.forEach(c => c.updateDisplay());
+  },
+  copyToConsole() {
+    console.log('camera', camera.position);
+    console.log('target', controls.target);
+    console.log('fov', camera.fov);
+  }
+};
+
+const camCtrls = [
+  camFolder.add(cam, 'fov', 20, 100, 1).name('FOV').onChange(cam.apply),
+  camFolder.add(cam, 'x', -10, 10, 0.01).name('pos.x').onChange(cam.apply),
+  camFolder.add(cam, 'y', -10, 10, 0.01).name('pos.y').onChange(cam.apply),
+  camFolder.add(cam, 'z', -10, 10, 0.01).name('pos.z').onChange(cam.apply),
+  camFolder.add(cam, 'tx', -10, 10, 0.01).name('target.x').onChange(cam.apply),
+  camFolder.add(cam, 'ty', -10, 10, 0.01).name('target.y').onChange(cam.apply),
+  camFolder.add(cam, 'tz', -10, 10, 0.01).name('target.z').onChange(cam.apply),
+];
+
+camFolder.add(controls, 'enableDamping').name('damping');
+camFolder.add(controls, 'enablePan').name('pan');
+camFolder.add(controls, 'minDistance', 0.1, 10, 0.1).name('minDist');
+camFolder.add(controls, 'maxDistance', 1, 50, 0.1).name('maxDist');
+camFolder.add(cam, 'frameTumpz').name('Frame Tumpz');
+camFolder.add(cam, 'reset').name('Reset view');
+camFolder.add(cam, 'copyToConsole').name('Copy to console');
 
 /**
  * Animate
@@ -376,7 +466,10 @@ const tick = () =>
 {
     // Timer
     timer.update()
-    const elapsedTime = timer.getElapsed()
+    const delta = timer.getDelta(); // seconds
+
+  // Drive the mixer every frame
+  if (tumpzMixer) tumpzMixer.update(delta);
 
     // Update controls
     controls.update()
@@ -398,6 +491,7 @@ if (isOnline) {
 }
 
 tick()
+
 
 // --- Keyboard shortcuts ---
 window.addEventListener('keydown', (event) => {
@@ -421,4 +515,6 @@ window.addEventListener('keydown', (event) => {
         }
     }
     // ... other key handlers ...
+
+    
 })
