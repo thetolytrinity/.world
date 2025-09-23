@@ -17,7 +17,7 @@ gui.hide ()
 // Debug object for GUI controls
 const debugObject = {
     wireframe:false,
-    pixelDensity: 1.45,
+    pixelDensity: 1.4,
     color: 0x020201, // SPOTLIGHT COLOR
 
 }
@@ -433,9 +433,16 @@ const cam = {
     camCtrls.forEach(c => c.updateDisplay());
   },
   copyToConsole() {
-    console.log('camera', camera.position);
-    console.log('target', controls.target);
-    console.log('fov', camera.fov);
+    const lines =
+  `camera.position.set(${camera.position.x.toFixed(2)}, ${camera.position.y.toFixed(2)}, ${camera.position.z.toFixed(2)});
+  controls.target.set(${controls.target.x.toFixed(2)}, ${controls.target.y.toFixed(2)}, ${controls.target.z.toFixed(2)});
+  camera.fov = ${camera.fov.toFixed(0)}; camera.updateProjectionMatrix();`;
+  
+    console.log(lines);
+  
+    navigator.clipboard.writeText(lines)
+      .then(() => console.log('[camera] Snippet copied to clipboard '))
+      .catch((e) => console.error('[camera] Clipboard write failed ', e));
   }
 };
 
